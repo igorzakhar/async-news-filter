@@ -1,5 +1,12 @@
 import aiohttp
 import asyncio
+from urllib.parse import urlparse
+
+import adapters
+
+
+def extract_domain_name(url):
+    return '_'.join(urlparse(url).netloc.split('.'))
 
 
 async def fetch(session, url):
@@ -9,9 +16,16 @@ async def fetch(session, url):
 
 
 async def main():
+    url = 'https://inosmi.ru/science/20191011/246010355.html'
     async with aiohttp.ClientSession() as session:
-        html = await fetch(session, 'http://example.com')
-        print(html)
+        html = await fetch(session, url)
+
+        sanitizer_name = extract_domain_name(url)
+        sanitizer = adapters.SANITIZERS.get(sanitizer_name)
+
+        if sanitizer:
+            print(sanitizer(html, plaintext=True))
 
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
