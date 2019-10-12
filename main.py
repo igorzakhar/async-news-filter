@@ -1,17 +1,39 @@
 import aiohttp
 import asyncio
+import contextlib
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
 
 import adapters
 import aiofiles
+import aionursery
 import pymorphy2
 from text_tools import split_by_words, calculate_jaundice_rate
 
 
+TEST_ARTICLES = [
+    'https://inosmi.ru/social/20191004/245951541.html',
+    'https://inosmi.ru/social/20191008/245982282.html',
+    'https://inosmi.ru/science/20191006/245965114.html',
+    'https://inosmi.ru/science/20191009/245994605.html',
+    'https://inosmi.ru/science/20191011/246010355.html'
+]
+
+
 def extract_domain_name(url):
     return '_'.join(urlparse(url).netloc.split('.'))
+
+
+@contextlib.asynccontextmanager
+async def create_handy_nursery():
+    try:
+        async with aionursery.Nursery() as nursery:
+            yield nursery
+    except aionursery.MultiError as e:
+        if len(e.exceptions) == 1:
+            raise e.exceptions[0]
+        raise
 
 
 async def get_charged_words(path):
@@ -30,26 +52,36 @@ async def fetch(session, url):
         return await response.text()
 
 
-async def main():
+async def process_article(session, morph, charged_words, url):
 
+    article_html = await fetch(session, url)
+
+    sanitizer_name = extract_domain_name(url)
+    sanitizer = adapters.SANITIZERS.get(sanitizer_name)
+
+    if sanitizer:
+        text, title = sanitizer(article_html, plaintext=True)
+        article_words = split_by_words(morph, text)
+        score = calculate_jaundice_rate(article_words, charged_words)
+
+    print('Заголовок:', title)
+    print('Рейтинг:', score)
+    print('Слов в статье:', len(article_words))
+    print(20 * '-')
+
+
+async def main():
     path = 'charged_dict'
     charged_words = await get_charged_words(path)
 
     morph = pymorphy2.MorphAnalyzer()
 
-    url = 'https://inosmi.ru/science/20191011/246010355.html'
-
     async with aiohttp.ClientSession() as session:
-        html = await fetch(session, url)
-
-        sanitizer_name = extract_domain_name(url)
-        sanitizer = adapters.SANITIZERS.get(sanitizer_name)
-
-        if sanitizer:
-            text = sanitizer(html, plaintext=True)
-            article_words = split_by_words(morph, text)
-            rate = calculate_jaundice_rate(article_words, charged_words)
-            print(f'Рейтинг: {rate}\nСлов в статье: {len(article_words)}')
+        async with create_handy_nursery() as nursery:
+            for url in TEST_ARTICLES:
+                nursery.start_soon(
+                    process_article(session, morph, charged_words, url)
+                )
 
 
 if __name__ == '__main__':

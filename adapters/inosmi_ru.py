@@ -8,7 +8,8 @@ from .html_tools import remove_buzz_attrs, remove_buzz_tags, remove_all_tags
 
 def sanitize(html, plaintext=False):
     soup = BeautifulSoup(html, 'html.parser')
-    articles = soup.select("article.article")
+    title = soup.select_one('h1.article-header__title').get_text()
+    articles = soup.select('article.article')
 
     if len(articles) != 1:
         raise ArticleNotFound()
@@ -32,7 +33,8 @@ def sanitize(html, plaintext=False):
     else:
         remove_all_tags(article)
         text = article.get_text()
-    return text.strip()
+
+    return text.strip(), title
 
 
 def test_sanitize():
@@ -59,6 +61,7 @@ def test_sanitize():
     assert '<h1>' not in clean_plaintext
     assert '</article>' not in clean_plaintext
     assert '<h1>' not in clean_plaintext
+
 
 def test_sanitize_wrong_url():
     resp = requests.get('http://example.com')
