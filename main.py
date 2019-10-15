@@ -1,6 +1,8 @@
 import aiohttp
 import asyncio
 import contextlib
+from enum import Enum
+import logging
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
@@ -12,13 +14,23 @@ import pymorphy2
 from text_tools import split_by_words, calculate_jaundice_rate
 
 
+logging.getLogger('asyncio').setLevel(logging.WARNING)
+logging.getLogger('pymorphy2').setLevel(logging.WARNING)
+
+
 TEST_ARTICLES = [
+    'https://url_does_not_exist.ru',
     'https://inosmi.ru/social/20191004/245951541.html',
     'https://inosmi.ru/social/20191008/245982282.html',
     'https://inosmi.ru/science/20191006/245965114.html',
     'https://inosmi.ru/science/20191009/245994605.html',
     'https://inosmi.ru/science/20191011/246010355.html'
 ]
+
+
+class ProcessingStatus(Enum):
+    OK = 'OK'
+    FETCH_ERROR = 'FETCH_ERROR'
 
 
 def extract_domain_name(url):
@@ -53,8 +65,21 @@ async def fetch(session, url):
 
 
 async def process_article(session, morph, charged_words, url):
+    result = {
+        'title': None,
+        'status': None,
+        'score': None,
+        'words_count': None
+    }
 
-    article_html = await fetch(session, url)
+    try:
+        article_html = await fetch(session, url)
+    except aiohttp.ClientConnectionError as err:
+        logging.debug(f'{err}')
+        result.update({
+            'title': 'URL does not exist',
+            'status': ProcessingStatus.FETCH_ERROR.value
+        })
 
     sanitizer_name = extract_domain_name(url)
     sanitizer = adapters.SANITIZERS.get(sanitizer_name)
@@ -64,11 +89,19 @@ async def process_article(session, morph, charged_words, url):
         article_words = split_by_words(morph, text)
         score = calculate_jaundice_rate(article_words, charged_words)
         words_count = len(article_words)
+        result.update({
+            'title': title,
+            'status': ProcessingStatus.OK.value,
+            'score': score,
+            'words_count': words_count
+        })
 
-    return title, score, words_count
+    return result
 
 
 async def main():
+    logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+
     path = 'charged_dict'
     charged_words = await get_charged_words(path)
 
@@ -87,9 +120,10 @@ async def main():
     done, _ = await asyncio.wait(tasks)
 
     for task in done:
-        print('Рейтинг:', task.result()[0])
-        print('Слов в статье:', task.result()[2])
-        print('Заголовок:', task.result()[1])
+        print('Заголовок:', task.result()['title'])
+        print('Статус:', task.result()['status'])
+        print('Рейтинг:', task.result()['score'])
+        print('Слов в статье:', task.result()['words_count'])
         print()
 
 
