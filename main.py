@@ -63,11 +63,9 @@ async def process_article(session, morph, charged_words, url):
         text, title = sanitizer(article_html, plaintext=True)
         article_words = split_by_words(morph, text)
         score = calculate_jaundice_rate(article_words, charged_words)
+        words_count = len(article_words)
 
-    print('Заголовок:', title)
-    print('Рейтинг:', score)
-    print('Слов в статье:', len(article_words))
-    print(20 * '-')
+    return title, score, words_count
 
 
 async def main():
@@ -76,12 +74,23 @@ async def main():
 
     morph = pymorphy2.MorphAnalyzer()
 
+    tasks = []
+
     async with aiohttp.ClientSession() as session:
         async with create_handy_nursery() as nursery:
             for url in TEST_ARTICLES:
-                nursery.start_soon(
+                task = nursery.start_soon(
                     process_article(session, morph, charged_words, url)
                 )
+                tasks.append(task)
+
+    done, _ = await asyncio.wait(tasks)
+
+    for task in done:
+        print('Рейтинг:', task.result()[0])
+        print('Слов в статье:', task.result()[2])
+        print('Заголовок:', task.result()[1])
+        print()
 
 
 if __name__ == '__main__':
