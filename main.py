@@ -2,7 +2,6 @@ import aiohttp
 import asyncio
 import contextlib
 from enum import Enum
-import logging
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
@@ -14,12 +13,9 @@ import pymorphy2
 from text_tools import split_by_words, calculate_jaundice_rate
 
 
-logging.getLogger('asyncio').setLevel(logging.WARNING)
-logging.getLogger('pymorphy2').setLevel(logging.WARNING)
-
-
 TEST_ARTICLES = [
     'https://url_does_not_exist.ru',
+    'https://lenta.ru/news/2019/10/15/real/',
     'https://inosmi.ru/social/20191004/245951541.html',
     'https://inosmi.ru/social/20191008/245982282.html',
     'https://inosmi.ru/science/20191006/245965114.html',
@@ -31,10 +27,18 @@ TEST_ARTICLES = [
 class ProcessingStatus(Enum):
     OK = 'OK'
     FETCH_ERROR = 'FETCH_ERROR'
+    PARSING_ERROR = 'PARSING_ERROR'
 
 
-def extract_domain_name(url):
-    return '_'.join(urlparse(url).netloc.split('.'))
+def get_sanitizer(url):
+    domain_name = urlparse(url).netloc
+    sanitizer_name = '_'.join(domain_name.split('.'))
+    sanitizer = adapters.SANITIZERS.get(sanitizer_name)
+
+    if sanitizer:
+        return sanitizer
+
+    raise adapters.ArticleNotFound(f'Статья на {domain_name}')
 
 
 @contextlib.asynccontextmanager
@@ -74,18 +78,19 @@ async def process_article(session, morph, charged_words, url):
 
     try:
         article_html = await fetch(session, url)
-    except aiohttp.ClientConnectionError as err:
-        logging.debug(f'{err}')
+        adapter = get_sanitizer(url)
+    except aiohttp.ClientConnectionError:
         result.update({
             'title': 'URL does not exist',
             'status': ProcessingStatus.FETCH_ERROR.value
         })
-
-    sanitizer_name = extract_domain_name(url)
-    sanitizer = adapters.SANITIZERS.get(sanitizer_name)
-
-    if sanitizer:
-        text, title = sanitizer(article_html, plaintext=True)
+    except adapters.ArticleNotFound as err:
+        result.update({
+            'title': err,
+            'status': ProcessingStatus.PARSING_ERROR.value
+        })
+    else:
+        text, title = adapter(article_html, plaintext=True)
         article_words = split_by_words(morph, text)
         score = calculate_jaundice_rate(article_words, charged_words)
         words_count = len(article_words)
@@ -100,8 +105,6 @@ async def process_article(session, morph, charged_words, url):
 
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG, format='%(message)s')
-
     path = 'charged_dict'
     charged_words = await get_charged_words(path)
 
