@@ -6,10 +6,12 @@ from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
 
-import adapters
 import aiofiles
 import aionursery
+from async_timeout import timeout
 import pymorphy2
+
+import adapters
 from text_tools import split_by_words, calculate_jaundice_rate
 
 
@@ -28,6 +30,7 @@ class ProcessingStatus(Enum):
     OK = 'OK'
     FETCH_ERROR = 'FETCH_ERROR'
     PARSING_ERROR = 'PARSING_ERROR'
+    TIMEOUT = 'TIMEOUT'
 
 
 def get_sanitizer(url):
@@ -68,7 +71,7 @@ async def fetch(session, url):
         return await response.text()
 
 
-async def process_article(session, morph, charged_words, url):
+async def process_article(session, morph, charged_words, url, resp_timeout=5):
     result = {
         'title': None,
         'status': None,
@@ -77,8 +80,9 @@ async def process_article(session, morph, charged_words, url):
     }
 
     try:
-        article_html = await fetch(session, url)
-        adapter = get_sanitizer(url)
+        async with timeout(resp_timeout):
+            article_html = await fetch(session, url)
+            adapter = get_sanitizer(url)
     except aiohttp.ClientConnectionError:
         result.update({
             'title': 'URL does not exist',
@@ -88,6 +92,11 @@ async def process_article(session, morph, charged_words, url):
         result.update({
             'title': err,
             'status': ProcessingStatus.PARSING_ERROR.value
+        })
+    except asyncio.TimeoutError:
+        result.update({
+            'title': 'Timeout Error',
+            'status': ProcessingStatus.TIMEOUT.value
         })
     else:
         text, title = adapter(article_html, plaintext=True)
@@ -110,13 +119,20 @@ async def main():
 
     morph = pymorphy2.MorphAnalyzer()
 
+    response_timeout = 0.8
     tasks = []
 
     async with aiohttp.ClientSession() as session:
         async with create_handy_nursery() as nursery:
             for url in TEST_ARTICLES:
                 task = nursery.start_soon(
-                    process_article(session, morph, charged_words, url)
+                    process_article(
+                        session,
+                        morph,
+                        charged_words,
+                        url,
+                        resp_timeout=response_timeout
+                    )
                 )
                 tasks.append(task)
 
