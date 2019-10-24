@@ -13,8 +13,8 @@ from async_timeout import timeout
 import pymorphy2
 
 import adapters
-from text_tools import split_by_words, calculate_jaundice_rate
-from timing import measure_exec_time
+from text_tools import calculate_jaundice_rate
+from time_measurement import measure_exec_time
 
 
 logging.getLogger('asyncio').setLevel(logging.WARNING)
@@ -79,50 +79,55 @@ async def fetch(session, url):
 
 
 async def process_article(session, morph, charged_words, url, resp_timeout=5):
-    result = {
+    article_info = {
         'title': None,
         'status': None,
         'score': None,
         'words_count': None,
-        'exec_time': None
     }
+    exec_time = None
 
     try:
         async with timeout(resp_timeout):
             article_html = await fetch(session, url)
             adapter = get_sanitizer(url)
+
     except aiohttp.ClientConnectionError:
-        result.update({
+        article_info.update({
             'title': 'URL does not exist',
             'status': ProcessingStatus.FETCH_ERROR.value
         })
 
     except adapters.ArticleNotFound as err:
-        result.update({
+        article_info.update({
             'title': err,
             'status': ProcessingStatus.PARSING_ERROR.value
         })
 
     except asyncio.TimeoutError:
-        result.update({
+        article_info.update({
             'title': 'Timeout Error',
             'status': ProcessingStatus.TIMEOUT.value
         })
 
     else:
         text, title = adapter(article_html, plaintext=True)
-        async with measure_exec_time(morph, text) as (exec_time, words):
-            score = calculate_jaundice_rate(words, charged_words)
-            result.update({
-                'title': title,
-                'status': ProcessingStatus.OK.value,
-                'score': score,
-                'words_count': len(words),
-                'exec_time': exec_time
-            })
-            logging.info(f'Анализ закончен за {exec_time:.2f} сек.')
+        async with measure_exec_time(morph, text) as (exec_time, words, err):
+            if err:
+                article_info.update({
+                    'title': title,
+                    'status': ProcessingStatus.TIMEOUT.value,
+                })
+            else:
+                score = calculate_jaundice_rate(words, charged_words)
+                article_info.update({
+                    'title': title,
+                    'status': ProcessingStatus.OK.value,
+                    'score': score,
+                    'words_count': len(words),
+                })
 
-    return result
+    return article_info, exec_time
 
 
 async def main():
@@ -152,10 +157,13 @@ async def main():
     done, _ = await asyncio.wait(tasks)
 
     for task in done:
-        print('Заголовок:', task.result()['title'])
-        print('Статус:', task.result()['status'])
-        print('Рейтинг:', task.result()['score'])
-        print('Слов в статье:', task.result()['words_count'])
+        article_info, exec_time = task.result()
+        print('Заголовок:', article_info.get('title'))
+        print('Статус:', article_info.get('status'))
+        print('Рейтинг:', article_info.get('score'))
+        print('Слов в статье:', article_info.get('words_count'))
+        if exec_time:
+            logging.info(f'Анализ закончен за {exec_time:.2f} сек.')
         print()
 
 
