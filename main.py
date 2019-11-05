@@ -2,12 +2,13 @@ import aiohttp
 import asyncio
 import contextlib
 from enum import Enum
+import functools
 import logging
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
 
-import aiofiles
+from aiohttp import web
 import aionursery
 from async_timeout import timeout
 import pymorphy2
@@ -62,12 +63,12 @@ async def create_handy_nursery():
         raise
 
 
-async def get_charged_words(path):
+def get_charged_words(path):
     words = []
     files = [join(path, fn) for fn in listdir(path) if isfile(join(path, fn))]
     for file in files:
-        async with aiofiles.open(file, mode='r') as afp:
-            contents = await afp.read()
+        with open(file, mode='r') as fp:
+            contents = fp.read()
             words.extend(contents.strip().split('\n'))
     return words
 
@@ -80,12 +81,13 @@ async def fetch(session, url):
 
 async def process_article(session, morph, charged_words, url, resp_timeout=5):
     article_info = {
+        'url': url,
         'title': None,
         'status': None,
         'score': None,
         'words_count': None,
+        'exec_time': None
     }
-    exec_time = None
 
     try:
         async with timeout(resp_timeout):
@@ -100,7 +102,7 @@ async def process_article(session, morph, charged_words, url, resp_timeout=5):
 
     except adapters.ArticleNotFound as err:
         article_info.update({
-            'title': err,
+            'title': str(err),
             'status': ProcessingStatus.PARSING_ERROR.value
         })
 
@@ -126,46 +128,74 @@ async def process_article(session, morph, charged_words, url, resp_timeout=5):
                     'score': score,
                     'words_count': len(words),
                 })
+            article_info.update({'exec_time': exec_time})
 
-    return article_info, exec_time
+    return article_info
 
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    path = 'charged_dict'
-    charged_words = await get_charged_words(path)
-
-    morph = pymorphy2.MorphAnalyzer()
-
-    response_timeout = 10
+async def get_articles_analysis_results(morph, charged_words, urls):
     tasks = []
 
     async with aiohttp.ClientSession() as session:
         async with create_handy_nursery() as nursery:
-            for url in TEST_ARTICLES:
+            for url in urls:
                 task = nursery.start_soon(
                     process_article(
                         session,
                         morph,
                         charged_words,
                         url,
-                        resp_timeout=response_timeout
                     )
                 )
                 tasks.append(task)
 
     done, _ = await asyncio.wait(tasks)
 
-    for task in done:
-        article_info, exec_time = task.result()
-        print('Заголовок:', article_info.get('title'))
-        print('Статус:', article_info.get('status'))
-        print('Рейтинг:', article_info.get('score'))
-        print('Слов в статье:', article_info.get('words_count'))
-        if exec_time:
-            logging.info(f'Анализ закончен за {exec_time:.2f} сек.')
-        print()
+    return [task.result() for task in done]
 
+
+def prepare_response(data):
+    response_fields = ('status', 'url', 'score', 'words_count')
+    response = [
+        {
+            key: value for key, value in entry.items()
+            if key in response_fields
+        }
+        for entry in data
+    ]
+    return response
+
+
+async def request_handler(morph, charged_words, request):
+    urls = request.query.get('urls')
+
+    if not urls:
+        return web.json_response({"error": "bad request"}, status=400)
+
+    urls_list = urls.split(',')
+    results = await get_articles_analysis_results(
+        morph,
+        charged_words,
+        urls_list
+    )
+    response_data = prepare_response(results)
+
+    return web.json_response(response_data)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    path = 'charged_dict'
+    charged_words = get_charged_words(path)
+
+    morph = pymorphy2.MorphAnalyzer()
+
+    app = web.Application()
+    app.add_routes([
+        web.get('/', functools.partial(request_handler, morph, charged_words))
+    ])
+
+    web.run_app(app)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
