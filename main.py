@@ -173,11 +173,19 @@ async def request_handler(morph, charged_words, request):
         return web.json_response({"error": "bad request"}, status=400)
 
     urls_list = urls.split(',')
+
+    if len(urls_list) > 10:
+        return web.json_response(
+            {"error": "too many urls in request, should be 10 or less"},
+            status=400
+        )
+
     results = await get_articles_analysis_results(
         morph,
         charged_words,
         urls_list
     )
+
     response_data = prepare_response(results)
 
     return web.json_response(response_data)
@@ -196,6 +204,7 @@ def main():
     ])
 
     web.run_app(app)
+
 
 if __name__ == '__main__':
     main()
