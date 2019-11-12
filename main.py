@@ -94,7 +94,7 @@ async def process_article(session, morph, charged_words, url, resp_timeout=5):
             article_html = await fetch(session, url)
             adapter = get_sanitizer(url)
 
-    except aiohttp.ClientConnectionError:
+    except aiohttp.ClientError:
         article_info.update({
             'title': 'URL does not exist',
             'status': ProcessingStatus.FETCH_ERROR.value
