@@ -1,5 +1,4 @@
 import asyncio
-import string
 
 import pymorphy2
 

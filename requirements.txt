@@ -2,11 +2,13 @@ aiohttp==3.*
 aiofiles==0.4.0
 aionursery==0.3.0
 async-timeout==3.0.1
+asynctest==0.13.0
 cchardet==2.*
 aiodns==2.*
 beautifulsoup4==4.*
 requests==2.*
 pytest==5.*
+pytest-asyncio==0.10.0
 pymorphy2==0.8
 pymorphy2-dicts==2.*
 DAWG-Python==0.7.*
