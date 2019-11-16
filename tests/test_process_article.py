@@ -50,9 +50,8 @@ async def mock_client_error(*args):
     raise aiohttp.ClientError
 
 
-async def mock_fetch_delay(*args):
-    delay = 6
-    await asyncio.sleep(delay)
+async def mock_timeout_error(*args):
+    raise asyncio.TimeoutError
 
 
 def test_article_not_found_raises(url_nonexistent_adapter):
@@ -116,7 +115,7 @@ async def test_fetch_timeout_error(session_mock, morph, charged_words):
 
     }
 
-    with asynctest.patch('main.fetch', side_effect=mock_fetch_delay):
+    with asynctest.patch('main.fetch', side_effect=mock_timeout_error):
         result = await process_article(session_mock, morph, charged_words, url)
         assert result == expected_data
 
