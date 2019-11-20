@@ -18,10 +18,6 @@ from text_tools import calculate_jaundice_rate
 from time_measurement import measure_exec_time
 
 
-logging.getLogger('asyncio').setLevel(logging.WARNING)
-logging.getLogger('pymorphy2').setLevel(logging.WARNING)
-
-
 TEST_ARTICLES = [
     'https://url_does_not_exist.ru',
     'https://lenta.ru/news/2019/10/15/real/',
@@ -166,7 +162,7 @@ def prepare_response(data):
     return response
 
 
-async def request_handler(morph, charged_words, request):
+async def handle_http_request(morph, charged_words, request):
     urls = request.query.get('urls')
 
     if not urls:
@@ -193,6 +189,9 @@ async def request_handler(morph, charged_words, request):
 
 def main():
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger('asyncio').setLevel(logging.WARNING)
+    logging.getLogger('pymorphy2').setLevel(logging.WARNING)
+
     path = 'charged_dict'
     charged_words = get_charged_words(path)
 
@@ -200,7 +199,10 @@ def main():
 
     app = web.Application()
     app.add_routes([
-        web.get('/', functools.partial(request_handler, morph, charged_words))
+        web.get(
+            '/',
+            functools.partial(handle_http_request, morph, charged_words)
+        )
     ])
 
     web.run_app(app)
